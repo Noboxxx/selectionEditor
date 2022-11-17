@@ -130,8 +130,8 @@ class SelectionEditor(QDialog):
                     inverse_name_filters.append(flt)
                 else:
                     name_filters.append(flt)
-        print name_filters, inverse_name_filters
-        print type_filters, inverse_type_filters
+        # print name_filters, inverse_name_filters
+        # print type_filters, inverse_type_filters
 
         name_filtered = cmds.ls(*name_filters) if name_filters else list()
         inverse_name_filtered = cmds.ls(*inverse_name_filters) if inverse_name_filters else list()
@@ -146,7 +146,7 @@ class SelectionEditor(QDialog):
         elif (name_filters + inverse_name_filters) and not (type_filters + inverse_type_filters):
             final_set = name_set
         elif not (name_filters + inverse_name_filters) and (type_filters + inverse_type_filters):
-            print 'plop'
+            # print 'plop'
             final_set = type_set
         else:
             final_set = set()
