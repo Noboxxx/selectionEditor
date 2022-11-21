@@ -1,3 +1,4 @@
+from datetime import datetime
 import webbrowser
 from PySide2.QtCore import Qt, QSize
 from PySide2.QtGui import QIcon, QPixmap, QColor
@@ -9,8 +10,7 @@ import shiboken2
 from functools import partial
 import json
 import os
-from maya.api.OpenMaya import MMatrix
-
+from maya.api.OpenMaya import MMatrix, MEventMessage
 
 dpiF = QApplication.desktop().logicalDpiX() / 96.0
 
@@ -45,6 +45,9 @@ class SelectionEditor(QDialog):
         self.setWindowTitle('Selection Editor')
         self.setMinimumSize(QSize(250 * dpiF, 250 * dpiF))
 
+        self.selection = None
+        self.historyEnabled = True
+
         # selection count
         self.selectionCount = QLabel()
 
@@ -66,6 +69,8 @@ class SelectionEditor(QDialog):
         self.selectionTree.setHeaderLabels(('index', 'name', 'type'))
 
         self.historyTree = QTreeWidget()
+        self.historyTree.itemSelectionChanged.connect(self.selectHistoryItem)
+        self.historyTree.setHeaderLabels(('time', 'len', 'content',))
 
         self.savedTree = QTreeWidget()
 
@@ -89,14 +94,60 @@ class SelectionEditor(QDialog):
         mainLayout.addWidget(self.selectionCount)
         mainLayout.addWidget(tabWid)
 
+        # callback
+        self.eventCallback = MEventMessage.addEventCallback('SelectionChanged', self.selectionChanged)
+        self.selectionChanged()
+
+    def selectHistoryItem(self, *args, **kwargs):
+        print(args, kwargs)
+        # selection = item.data(0, Qt.UserRole)
+        #
+        # self.historyEnabled = False
+        # cmds.select(selection)
+        # self.historyEnabled = True
+
+    def removeCallBack(self):
+        try:
+            MEventMessage.removeCallback(self.eventCallback)
+        except RuntimeError or AttributeError:
+            pass
+
+    def deleteLater(self, *args, **kwargs):
+        self.removeCallBack()
+        super(SelectionEditor, self).deleteLater(*args, **kwargs)
+
+    def closeEvent(self, *args, **kwargs):
+        self.removeCallBack()
+        super(SelectionEditor, self).closeEvent(*args, **kwargs)
+
+    def selectionChanged(self, *args, **kwargs):
+        selection = cmds.ls(sl=True, long=True)
+
+        if selection == self.selection:
+            return
+
+        self.selection = selection
+
         self.reloadSelectionTree()
 
+        if not selection or not self.historyEnabled:
+            return
+
+        self.addEntryToHistory()
+
+    def addEntryToHistory(self):
+        currentDateAndTime = datetime.now()
+        selectionLabel = ', '.join([i.split('|')[-1] for i in self.selection])
+        item = QTreeWidgetItem((currentDateAndTime.strftime("%H:%M:%S"), str(len(self.selection)), selectionLabel,))
+
+        item.setData(0, Qt.UserRole, self.selection)
+        self.historyTree.addTopLevelItem(item)
+
     def reloadSelectionTree(self):
-        selection = cmds.ls(sl=True, long=True)
-        self.selectionCount.setText('<b>{} selected</b>'.format(len(selection)))
+        self.selectionCount.setText('<b>{} selected</b>'.format(len(self.selection)))
 
         self.selectionTree.clear()
-        for index, longName in enumerate(selection):
+        for index, longName in enumerate(self.selection):
             objType = cmds.objectType(longName)
             shortName = longName.split('|')[-1]
             item = QTreeWidgetItem(('{0:0=4d}'.format(index), shortName, objType))
