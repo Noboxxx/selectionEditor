@@ -4,7 +4,7 @@ from PySide2.QtCore import Qt, QSize
 from PySide2.QtGui import QIcon, QPixmap, QColor
 from PySide2.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QPushButton, QGridLayout, QColorDialog, \
     QComboBox, QLabel, QDoubleSpinBox, QDialog, QCheckBox, QFrame, QApplication, QLineEdit, QFileDialog, QMenuBar, \
-    QMenu, QAction, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QTabWidget
+    QMenu, QAction, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QTabWidget, QWidget
 from maya import OpenMayaUI, cmds
 import shiboken2
 from functools import partial
@@ -36,128 +36,51 @@ def createSeparator():
     return separator
 
 
-class SelectionEditor(QDialog):
+def clamp(minimum, val, maximum):
+    return max(minimum, min(val, maximum))
 
-    def __init__(self, parent=getMayaMainWindow()):
-        super(SelectionEditor, self).__init__(parent=parent)
-        killOtherInstances(self)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-        self.setWindowTitle('Selection Editor')
-        self.setMinimumSize(QSize(250 * dpiF, 250 * dpiF))
 
-        self.selection = None
-        self.historyEnabled = True
+class SelectByNameLine(QLineEdit):
 
-        # selection count
-        self.selectionCount = QLabel()
+    def __init__(self, *args, **kwargs):
+        super(SelectByNameLine, self).__init__(*args, **kwargs)
 
-        # select by name and type
-        self.selectByNameTypeHistory = list()
-        self.selectByNameTypeField = QLineEdit()
-        self.selectByNameTypeBtn = QPushButton('>')
-        self.selectByNameTypeBtn.clicked.connect(self.selectByNameType)
+        self.history = list()
+        self.index = -1
 
-        selectByNameTypeLayout = QHBoxLayout()
-        selectByNameTypeLayout.addWidget(self.selectByNameTypeField)
-        selectByNameTypeLayout.addWidget(self.selectByNameTypeBtn)
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Up:
+            event.accept()
+            try:
+                txt = self.history[self.index + 1]
+                self.index += 1
+                self.setText(txt)
+            except IndexError:
+                pass
 
-        # selection tree
-        self.selectionTree = QTreeWidget()
-        self.selectionTree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        self.selectionTree.setSortingEnabled(True)
-        self.selectionTree.sortItems(0, Qt.AscendingOrder)
-        self.selectionTree.setHeaderLabels(('index', 'name', 'type'))
+        elif event.key() == Qt.Key_Down:
+            event.accept()
+            newIndex = self.index - 1
+            if newIndex >= 0:
+                txt = self.history[newIndex]
+                self.index = newIndex
+            else:
+                txt = ''
+                self.index = -1
+            self.setText(txt)
 
-        self.historyTree = QTreeWidget()
-        self.historyTree.itemSelectionChanged.connect(self.selectHistoryItem)
-        self.historyTree.setHeaderLabels(('time', 'len', 'content',))
+        elif event.key() == Qt.Key_Return:
+            event.accept()
+            self.index = -1
+            self.history.insert(0, self.text())
+            self.select()
+            self.setText('')
 
-        self.savedTree = QTreeWidget()
+        else:
+            super(SelectByNameLine, self).keyPressEvent(event)
 
-        # menuBar
-        reloadAct = QAction('Reload', self)
-        reloadAct.triggered.connect(self.reloadSelectionTree)
-
-        menuBar = QMenuBar()
-        menuBar.addAction(reloadAct)
-
-        #
-        tabWid = QTabWidget()
-        tabWid.addTab(self.selectionTree, 'Selection')
-        tabWid.addTab(self.historyTree, 'History')
-        tabWid.addTab(self.savedTree, 'Saved')
-
-        # main layout
-        mainLayout = QVBoxLayout(self)
-        mainLayout.setMenuBar(menuBar)
-        mainLayout.addLayout(selectByNameTypeLayout)
-        mainLayout.addWidget(self.selectionCount)
-        mainLayout.addWidget(tabWid)
-
-        # callback
-        self.eventCallback = MEventMessage.addEventCallback('SelectionChanged', self.selectionChanged)
-        self.selectionChanged()
-
-    def selectHistoryItem(self, *args, **kwargs):
-        print(args, kwargs)
-        # selection = item.data(0, Qt.UserRole)
-        #
-        # self.historyEnabled = False
-        # cmds.select(selection)
-        # self.historyEnabled = True
-
-    def removeCallBack(self):
-        try:
-            MEventMessage.removeCallback(self.eventCallback)
-        except RuntimeError or AttributeError:
-            pass
-
-    def deleteLater(self, *args, **kwargs):
-        self.removeCallBack()
-        super(SelectionEditor, self).deleteLater(*args, **kwargs)
-
-    def closeEvent(self, *args, **kwargs):
-        self.removeCallBack()
-        super(SelectionEditor, self).closeEvent(*args, **kwargs)
-
-    def selectionChanged(self, *args, **kwargs):
-        selection = cmds.ls(sl=True, long=True)
-
-        if selection == self.selection:
-            return
-
-        self.selection = selection
-
-        self.reloadSelectionTree()
-
-        if not selection or not self.historyEnabled:
-            return
-
-        self.addEntryToHistory()
-
-    def addEntryToHistory(self):
-        currentDateAndTime = datetime.now()
-        selectionLabel = ', '.join([i.split('|')[-1] for i in self.selection])
-        item = QTreeWidgetItem((currentDateAndTime.strftime("%H:%M:%S"), str(len(self.selection)), selectionLabel,))
-
-        item.setData(0, Qt.UserRole, self.selection)
-        self.historyTree.addTopLevelItem(item)
-
-    def reloadSelectionTree(self):
-        self.selectionCount.setText('<b>{} selected</b>'.format(len(self.selection)))
-
-        self.selectionTree.clear()
-        for index, longName in enumerate(self.selection):
-            objType = cmds.objectType(longName)
-            shortName = longName.split('|')[-1]
-            item = QTreeWidgetItem(('{0:0=4d}'.format(index), shortName, objType))
-            item.setToolTip(1, '{} ({})'.format(longName, objType))
-            item.setIcon(1, QIcon(':{}.svg'.format(objType)))
-
-            self.selectionTree.addTopLevelItem(item)
-
-    def selectByNameType(self):
-        rawInput = self.selectByNameTypeField.text()
+    def select(self):
+        rawInput = self.text()
 
         name_filters = list()
         inverse_name_filters = list()
@@ -202,5 +125,176 @@ class SelectionEditor(QDialog):
         else:
             final_set = set()
 
-        cmds.select(list(final_set))
-        self.reloadSelectionTree()
+        cmds.select(list(final_set), noExpand=True)
+
+
+class SelectionEditor(QDialog):
+
+    def __init__(self, parent=getMayaMainWindow()):
+        super(SelectionEditor, self).__init__(parent=parent)
+        killOtherInstances(self)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowTitle('Selection Editor')
+        self.setMinimumSize(QSize(250 * dpiF, 250 * dpiF))
+
+        self.selection = None
+        self.historySelection = None
+        self.historyEnabled = True
+        self.selectionEnabled = True
+
+        # selection count
+        self.selectionCount = QLabel()
+
+        # select by name and type
+        self.selectByNameTypeHistory = list()
+        self.selectByNameTypeField = SelectByNameLine()
+        # self.selectByNameTypeBtn = QPushButton('>')
+        # self.selectByNameTypeBtn.clicked.connect(self.selectByNameType)
+
+        selectByNameTypeLayout = QHBoxLayout()
+        selectByNameTypeLayout.addWidget(self.selectByNameTypeField)
+        # selectByNameTypeLayout.addWidget(self.selectByNameTypeBtn)
+
+        # selection tree
+        lockSelection = QPushButton()
+        lockSelection.toggled.connect(self.lockToggled)
+        lockSelection.setIcon(QIcon(':lock.png'))
+        lockSelection.setCheckable(True)
+
+        saveSelection = QPushButton()
+        saveSelection.setIcon(QIcon(':addBookmark.png'))
+
+        selectionOptionsLayout = QHBoxLayout()
+        selectionOptionsLayout.addWidget(saveSelection)
+        selectionOptionsLayout.addStretch()
+        selectionOptionsLayout.addWidget(lockSelection)
+
+        self.selectionTree = QTreeWidget()
+        self.selectionTree.itemSelectionChanged.connect(self.selectSelectionItem)
+        self.selectionTree.setSelectionMode(QTreeWidget.ExtendedSelection)
+        self.selectionTree.setSortingEnabled(True)
+        self.selectionTree.sortItems(0, Qt.AscendingOrder)
+        self.selectionTree.setHeaderLabels(('index', 'name', 'type'))
+
+        selectionLayout = QVBoxLayout()
+        selectionLayout.addWidget(self.selectionTree)
+        selectionLayout.addLayout(selectionOptionsLayout)
+
+        selectionTab = QWidget()
+        selectionTab.setLayout(selectionLayout)
+
+        #
+
+        self.historyTree = QTreeWidget()
+        self.historyTree.itemSelectionChanged.connect(self.selectHistoryItem)
+        self.historyTree.setHeaderLabels(('time', 'len', 'content',))
+
+        self.savedTree = QTreeWidget()
+
+        #
+        tabWid = QTabWidget()
+        tabWid.addTab(selectionTab, 'Selection')
+        tabWid.addTab(self.historyTree, 'History')
+        tabWid.addTab(self.savedTree, 'Saved')
+
+        # main layout
+        mainLayout = QVBoxLayout(self)
+        mainLayout.addLayout(selectByNameTypeLayout)
+        mainLayout.addWidget(self.selectionCount)
+        mainLayout.addWidget(tabWid)
+
+        # callback
+        self.eventCallback = MEventMessage.addEventCallback('SelectionChanged', self.selectionChanged)
+        self.selectionChanged()
+
+    def lockToggled(self, state):
+        self.selectionEnabled = not state
+
+    def selectHistoryItem(self, *args, **kwargs):
+        items = self.historyTree.selectedItems()
+
+        if not items:
+            return
+
+        item = items[-1]
+
+        selection = item.data(0, Qt.UserRole)
+
+        self.historyEnabled = False
+        cmds.select(selection, noExpand=True)
+        self.historyEnabled = True
+
+    def selectSelectionItem(self, *args, **kwargs):
+        items = self.selectionTree.selectedItems()
+
+        selection = [i.data(0, Qt.UserRole) for i in items]
+
+        self.selectionEnabled = False
+        cmds.select(selection, noExpand=True)
+        self.selectionEnabled = True
+
+    def removeCallBack(self):
+        try:
+            MEventMessage.removeCallback(self.eventCallback)
+        except RuntimeError:
+            pass
+        except AttributeError:
+            pass
+
+    def deleteLater(self, *args, **kwargs):
+        self.removeCallBack()
+        super(SelectionEditor, self).deleteLater(*args, **kwargs)
+
+    def closeEvent(self, *args, **kwargs):
+        self.removeCallBack()
+        super(SelectionEditor, self).closeEvent(*args, **kwargs)
+
+    def selectionChanged(self, *args, **kwargs):
+        print('SELECTION CHANGED')
+        selection = cmds.ls(sl=True, long=True)
+
+        print(selection, self.selection)
+        if selection != self.selection and self.selectionEnabled:
+            self.reloadSelectionTree(selection)
+            self.selection = selection
+
+        if selection and self.historyEnabled and selection != self.historySelection:
+            self.addEntryToHistory(selection)
+            self.historySelection = selection
+
+    def addEntryToHistory(self, selection):
+        self.historyTree.clearSelection()
+
+        currentDateAndTime = datetime.now()
+        selectionLabel = ', '.join([i.split('|')[-1] for i in selection])
+        item = QTreeWidgetItem((currentDateAndTime.strftime("%H:%M:%S"), str(len(selection)), selectionLabel,))
+
+        item.setData(0, Qt.UserRole, selection)
+        self.historyTree.insertTopLevelItem(0, item)
+
+        self.historyEnabled = False
+        item.setSelected(True)
+        self.historyEnabled = True
+
+    def reloadSelectionTree(self, selection):
+        lenSelection = len(selection)
+
+        if lenSelection == 1:
+            selectionText = '<b>1 object selected</b>'
+        elif lenSelection:
+            selectionText = '<b>{} objects selected</b>'.format(lenSelection)
+        else:
+            selectionText = '<b>Nothing selected</b>'
+
+        self.selectionCount.setText(selectionText)
+
+        self.selectionTree.clear()
+        for index, longName in enumerate(selection):
+            objType = cmds.objectType(longName)
+            shortName = longName.split('|')[-1]
+            item = QTreeWidgetItem(('{0:0=4d}'.format(index), shortName, objType))
+            item.setData(0, Qt.UserRole, longName)
+            item.setToolTip(1, '{} ({})'.format(longName, objType))
+            item.setIcon(1, QIcon(':{}.svg'.format(objType)))
+
+            self.selectionTree.addTopLevelItem(item)
