@@ -5,10 +5,11 @@ import webbrowser
 from PySide2.QtSvg import QSvgRenderer
 
 from PySide2.QtCore import Qt, QSize, QRect
-from PySide2.QtGui import QIcon, QPixmap, QColor, QPainter, QImage
+from PySide2.QtGui import QIcon, QPixmap, QColor, QPainter, QImage, QMouseEvent
 from PySide2.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QPushButton, QGridLayout, QColorDialog, \
     QComboBox, QLabel, QDoubleSpinBox, QDialog, QCheckBox, QFrame, QApplication, QLineEdit, QFileDialog, QMenuBar, \
-    QMenu, QAction, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QTabWidget, QWidget
+    QMenu, QAction, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QTabWidget, QWidget, QListWidget, \
+    QListWidgetItem, QScrollBar
 from maya import OpenMayaUI, cmds
 import shiboken2
 from functools import partial
@@ -166,6 +167,93 @@ class IconWidget(QWidget):
         # painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
 
+class IconButton(QWidget):
+
+    images = dict()
+
+    def __init__(self, idleImageFile, checkedImageFile=None, checkable=False, parent=None):
+        super(IconButton, self).__init__(parent=parent)
+        self.idleImageFile = idleImageFile
+        self.checkedImageFile = checkedImageFile
+        self.isCheckable = checkable
+
+        self.clicked = list()
+        self.checked = list()
+
+        self.isHovered = False
+        self.isClicked = False
+        self.isChecked = False
+
+        self.hoveredColor = 50
+        self.clickedColor = 100
+
+    def enterEvent(self, *args, **kwargs):
+        super(IconButton, self).enterEvent(*args, **kwargs)
+        # print('ENTER')
+
+        self.isHovered = True
+        self.update()
+
+    def leaveEvent(self, *args, **kwargs):
+        super(IconButton, self).leaveEvent(*args, **kwargs)
+        # print('LEAVE')
+
+        self.isHovered = False
+        self.update()
+
+    def mousePressEvent(self, event):  # type: (QMouseEvent) -> None
+        if event.button() == Qt.LeftButton:
+            self.isClicked = True
+            event.accept()
+            self.update()
+        else:
+            super(IconButton, self).mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+
+            self.isClicked = False
+
+            if self.isCheckable:
+                self.isChecked = not self.isChecked
+                [func(self.isChecked) for func in self.checked]
+
+            [func() for func in self.clicked]
+
+            event.accept()
+            self.update()
+        else:
+            super(IconButton, self).mouseReleaseEvent(event)
+
+    def offsetImageColor(self, img, offsetColor):
+        for x in range(img.width()):
+            for y in range(img.height()):
+                color = img.pixelColor(x, y)  # type: QColor
+
+                r = min(color.red() + offsetColor, 255)
+                g = min(color.green() + offsetColor, 255)
+                b = min(color.blue() + offsetColor, 255)
+                a = color.alpha()
+
+                img.setPixelColor(x, y, QColor(r, g, b, a))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+
+        # img
+        img = QImage(self.idleImageFile)
+        if self.isCheckable and self.isChecked and self.checkedImageFile:
+            img = QImage(self.checkedImageFile)
+
+        if self.isClicked:
+            self.offsetImageColor(img, self.clickedColor)
+        elif self.isHovered:
+            self.offsetImageColor(img, self.hoveredColor)
+
+        img = img.smoothScaled(self.width(), self.height())
+        painter.drawImage(0, 0, img)
+
+
 class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
 
     def __init__(self, parent=getMayaMainWindow()):
@@ -181,6 +269,7 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
 
         # selection count
         self.selectionCount = QLabel()
+        self.selectionCount.setToolTip('Number of Selected Objects')
 
         # select by name and type
         self.selectByNameTypeHistory = list()
@@ -188,34 +277,38 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         pixmap = QPixmap(':quickSelect.png')
 
         selectByNameLabel = QLabel()
+        selectByNameLabel.setToolTip('Select by Name and Type')
         selectByNameLabel.setPixmap(pixmap.scaled(40, 40))
 
         selectByNameTypeLayout = QHBoxLayout()
         selectByNameTypeLayout.addWidget(selectByNameLabel)
         selectByNameTypeLayout.addWidget(self.selectByNameTypeField)
-        selectByNameTypeLayout.addWidget(self.selectionCount)
+        # selectByNameTypeLayout.addWidget(self.selectionCount)
 
-        # # selection tree
-        # lockSelection = QPushButton()
-        # lockSelection.toggled.connect(self.lockToggled)
-        # lockSelection.setIcon(QIcon(':lock.png'))
-        # lockSelection.setCheckable(True)
-        #
-        # saveSelection = QPushButton()
-        # saveSelection.setIcon(QIcon(':addBookmark.png'))
-        #
-        # selectionOptionsLayout = QHBoxLayout()
-        # selectionOptionsLayout.addWidget(saveSelection)
-        # selectionOptionsLayout.addStretch()
-        # selectionOptionsLayout.addWidget(lockSelection)
+        # selection tree
+        lockSelection = IconButton(':unlockGeneric.png', ':lock.png', checkable=True)
+        lockSelection.setToolTip('Lock/Unlock Auto-Reload')
+        lockSelection.setMinimumSize(QSize(30, 30))
+        lockSelection.checked.append(self.lockToggled)
 
-        self.selectionTree = QTreeWidget()
-        self.selectionTree.itemSelectionChanged.connect(self.selectSelectionItem)
-        self.selectionTree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        self.selectionTree.setSortingEnabled(True)
-        self.selectionTree.sortItems(0, Qt.AscendingOrder)
-        self.selectionTree.setHeaderHidden(True)
-        # self.selectionTree.setHeaderLabels(('index', 'name', 'type'))
+        saveSelection = IconButton(':addBookmark.png')
+        saveSelection.setToolTip('Save Current Selection')
+        saveSelection.setMinimumSize(QSize(30, 30))
+
+        copySelectionTab = IconButton(':UVTkCopySet.png')
+        copySelectionTab.setToolTip('Copy Current Selection in another Tab')
+        copySelectionTab.setMinimumSize(QSize(30, 30))
+
+        selectionOptionsLayout = QHBoxLayout()
+        selectionOptionsLayout.addWidget(lockSelection)
+        selectionOptionsLayout.addWidget(saveSelection)
+        selectionOptionsLayout.addWidget(copySelectionTab)
+        selectionOptionsLayout.addStretch()
+        selectionOptionsLayout.addWidget(self.selectionCount)
+
+        self.selectionList = QListWidget()
+        self.selectionList.itemSelectionChanged.connect(self.selectSelectionItem)
+        self.selectionList.setSelectionMode(QListWidget.ExtendedSelection)
 
         refreshAct = QAction('Auto-Refresh', self)
         # refreshAct.setCheckable(True)
@@ -229,8 +322,8 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         selectionLayout = QVBoxLayout()
         selectionLayout.setMenuBar(menuBar)
         # selectionLayout.setMargin(0)
-        selectionLayout.addWidget(self.selectionTree)
-        # selectionLayout.addLayout(selectionOptionsLayout)
+        selectionLayout.addLayout(selectionOptionsLayout)
+        selectionLayout.addWidget(self.selectionList)
 
         selectionTab = QWidget()
         selectionTab.setLayout(selectionLayout)
@@ -249,17 +342,8 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         tabWid.addTab(self.historyTree, 'History')
         tabWid.addTab(self.savedTree, 'Saved')
 
-        # plop
-        menuBar = QMenuBar()
-        menuBar.addMenu(QMenu('Display'))
-        llay = QVBoxLayout()
-        llay.setMenuBar(menuBar)
-        llay.addWidget(QLabel('plopppp'))
-
         # main layout
         mainLayout = QVBoxLayout(self)
-        # mainLayout.setMenuBar(menuBar)
-        mainLayout.addLayout(llay)
         mainLayout.addLayout(selectByNameTypeLayout)
         mainLayout.addWidget(tabWid)
 
@@ -288,9 +372,9 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         self.historyEnabled = True
 
     def selectSelectionItem(self, *args, **kwargs):
-        items = self.selectionTree.selectedItems()
+        items = self.selectionList.selectedItems()
 
-        selection = [i.data(0, Qt.UserRole) for i in items]
+        selection = [i.data(Qt.UserRole) for i in items]
 
         self.selectionEnabled = False
         cmds.select(selection, noExpand=True)
@@ -355,32 +439,38 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         shortNames = list()
         names = list()
         nonUniqueNames = list()
+        namespaces = list()
         for longName in selection:
             name = longName.split('|')[-1]
-            shortName = name.split(':')[-1]
+            nameSplit = name.split(':')
+            shortName = nameSplit[-1]
+            namespace = ':'.join(nameSplit[:-1])
 
             if shortName in shortNames:
                 if shortName not in nonUniqueNames:
                     nonUniqueNames.append(shortName)
 
             names.append(name)
+            namespaces.append(namespace)
             shortNames.append(shortName)
 
-        self.selectionTree.clear()
-        for index, (longName, name, shortName) in enumerate(zip(selection, names, shortNames)):
+        self.selectionList.clear()
+        for index, (longName, name, shortName, namespace) in enumerate(zip(selection, names, shortNames, namespaces)):
             objType = cmds.objectType(longName)
 
-            item = QTreeWidgetItem()
-            item.setData(0, Qt.UserRole, longName)
-            item.setToolTip(0, '{} ({})'.format(name, objType))
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, longName)
+            item.setToolTip('{} ({})'.format(name, objType))
 
             icon = IconWidget(longName, self)
-            icon.setFixedSize(QSize(40, 40))
+            icon.setFixedSize(QSize(35, 35))
 
-            if self.namespace:
-                nameLabel = QLabel(name)
+            if namespace:
+                nameLabel = QLabel('<FONT COLOR="gray">{}:</FONT>{}'.format(namespace, shortName))
             else:
-                nameLabel = QLabel(shortName) if shortName not in nonUniqueNames else QLabel(name)
+                nameLabel = QLabel(shortName)
+            # shortNameLabel = QLabel(shortName)
+            # namespaceLabel = QLabel(namespace)
 
             lay = QHBoxLayout()
             lay.setMargin(2)
@@ -390,6 +480,6 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
             wid = QWidget()
             wid.setLayout(lay)
 
-            self.selectionTree.addTopLevelItem(item)
-            self.selectionTree.setItemWidget(item, 0, wid)
-            item.setSizeHint(0, QSize(0, 40))
+            self.selectionList.addItem(item)
+            self.selectionList.setItemWidget(item, wid)
+            item.setSizeHint(QSize(0, 35))
