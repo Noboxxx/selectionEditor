@@ -296,8 +296,9 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         saveSelection.setMinimumSize(QSize(30, 30))
 
         copySelectionTab = IconButton(':UVTkCopySet.png')
-        copySelectionTab.setToolTip('Copy Current Selection in another Tab')
+        copySelectionTab.setToolTip('Tear Off Selection in another Window')
         copySelectionTab.setMinimumSize(QSize(30, 30))
+        copySelectionTab.clicked.append(self.tearOffSelectionCopy)
 
         selectionOptionsLayout = QHBoxLayout()
         selectionOptionsLayout.addWidget(lockSelection)
@@ -306,9 +307,9 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         selectionOptionsLayout.addStretch()
         selectionOptionsLayout.addWidget(self.selectionCount)
 
-        self.selectionList = QListWidget()
-        self.selectionList.itemSelectionChanged.connect(self.selectSelectionItem)
-        self.selectionList.setSelectionMode(QListWidget.ExtendedSelection)
+        self.selectionTree = SelectionTree()
+        self.selectionTree.itemSelectionChanged.connect(self.selectSelectionItem)
+        # self.selectionList.setSelectionMode(QListWidget.ExtendedSelection)
 
         refreshAct = QAction('Auto-Refresh', self)
         # refreshAct.setCheckable(True)
@@ -323,7 +324,7 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         selectionLayout.setMenuBar(menuBar)
         # selectionLayout.setMargin(0)
         selectionLayout.addLayout(selectionOptionsLayout)
-        selectionLayout.addWidget(self.selectionList)
+        selectionLayout.addWidget(self.selectionTree)
 
         selectionTab = QWidget()
         selectionTab.setLayout(selectionLayout)
@@ -372,12 +373,8 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         self.historyEnabled = True
 
     def selectSelectionItem(self, *args, **kwargs):
-        items = self.selectionList.selectedItems()
-
-        selection = [i.data(Qt.UserRole) for i in items]
-
         self.selectionEnabled = False
-        cmds.select(selection, noExpand=True)
+        cmds.select(self.selectionTree.selectedNodes(), noExpand=True)
         self.selectionEnabled = True
 
     def removeCallBack(self):
@@ -413,7 +410,7 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         self.selectionCount.setText('<b>{}</b>'.format(len(selection)))
 
         if selection != self.selection and self.selectionEnabled:
-            self.reloadSelectionTree(selection)
+            self.selectionTree.load(selection)
             self.selection = selection
 
         print('SELECTION CHANGED', time.time() - start)
@@ -435,12 +432,29 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         item.setSelected(True)
         self.historyEnabled = True
 
-    def reloadSelectionTree(self, selection):
+    def tearOffSelectionCopy(self):
+        ui = TearOffSelectionWindow(self.selectionTree.nodes, parent=self)
+        ui.show()
+
+
+class SelectionTree(QListWidget):
+    def __init__(self, *args, **kwargs):
+        super(SelectionTree, self).__init__(*args, **kwargs)
+        self.setSelectionMode(QListWidget.ExtendedSelection)
+        self.nodes = list()
+
+    def selectedNodes(self):
+        return [i.data(Qt.UserRole) for i in self.selectedItems()]
+
+    def load(self, nodes):
+        self.clear()
+        self.nodes = nodes
+
         shortNames = list()
         names = list()
         nonUniqueNames = list()
         namespaces = list()
-        for longName in selection:
+        for longName in nodes:
             name = longName.split('|')[-1]
             nameSplit = name.split(':')
             shortName = nameSplit[-1]
@@ -454,8 +468,7 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
             namespaces.append(namespace)
             shortNames.append(shortName)
 
-        self.selectionList.clear()
-        for index, (longName, name, shortName, namespace) in enumerate(zip(selection, names, shortNames, namespaces)):
+        for index, (longName, name, shortName, namespace) in enumerate(zip(nodes, names, shortNames, namespaces)):
             objType = cmds.objectType(longName)
 
             item = QListWidgetItem()
@@ -465,21 +478,38 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
             icon = IconWidget(longName, self)
             icon.setFixedSize(QSize(35, 35))
 
-            if namespace:
-                nameLabel = QLabel('<FONT COLOR="gray">{}:</FONT>{}'.format(namespace, shortName))
-            else:
-                nameLabel = QLabel(shortName)
-            # shortNameLabel = QLabel(shortName)
-            # namespaceLabel = QLabel(namespace)
+            shortNameLabel = QLabel(shortName)
 
             lay = QHBoxLayout()
             lay.setMargin(2)
             lay.addWidget(icon)
-            lay.addWidget(nameLabel)
+            if namespace:
+                namespaceLabel = QLabel('{}:'.format(namespace))
+                namespaceLabel.setStyleSheet("QLabel {color: gray;}")
+                lay.addWidget(namespaceLabel)
+            lay.addWidget(shortNameLabel)
+            lay.addStretch()
 
             wid = QWidget()
             wid.setLayout(lay)
 
-            self.selectionList.addItem(item)
-            self.selectionList.setItemWidget(item, wid)
+            self.addItem(item)
+            self.setItemWidget(item, wid)
             item.setSizeHint(QSize(0, 35))
+
+    # def select(self):
+    #     nodes = [i.data(0, Qt.UserRole) for i in self.selectedItems()]
+    #     cmds.select(nodes, noExpand=True)
+
+
+class TearOffSelectionWindow(QDialog):
+
+    def __init__(self, nodes, parent=None):
+        super(TearOffSelectionWindow, self).__init__(parent)
+        self.setWindowTitle('Tear Off Selection')
+
+        self.selectionTree = SelectionTree()
+        self.selectionTree.load(nodes)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.selectionTree)
