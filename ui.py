@@ -5,7 +5,7 @@ import webbrowser
 from PySide2.QtSvg import QSvgRenderer
 
 from PySide2.QtCore import Qt, QSize, QRect
-from PySide2.QtGui import QIcon, QPixmap, QColor, QPainter, QImage, QMouseEvent
+from PySide2.QtGui import QIcon, QPixmap, QColor, QPainter, QImage, QMouseEvent, QFont, QFontMetrics, QPen
 from PySide2.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QPushButton, QGridLayout, QColorDialog, \
     QComboBox, QLabel, QDoubleSpinBox, QDialog, QCheckBox, QFrame, QApplication, QLineEdit, QFileDialog, QMenuBar, \
     QMenu, QAction, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QTabWidget, QWidget, QListWidget, \
@@ -103,12 +103,12 @@ class SelectByNameLine(QLineEdit):
                 else:
                     name_filters.append(flt)
 
-        name_filtered = cmds.ls(*name_filters) if name_filters else list()
-        inverse_name_filtered = cmds.ls(*inverse_name_filters) if inverse_name_filters else list()
+        name_filtered = cmds.ls(*name_filters, recursive=True) if name_filters else list()
+        inverse_name_filtered = cmds.ls(*inverse_name_filters, recursive=True) if inverse_name_filters else list()
         name_set = set(name_filtered).difference(inverse_name_filtered)
 
-        type_filtered = cmds.ls(type=type_filters) if type_filters else list()
-        inverse_type_filtered = cmds.ls(type=inverse_type_filters) if inverse_type_filters else list()
+        type_filtered = cmds.ls(type=type_filters, recursive=True) if type_filters else list()
+        inverse_type_filtered = cmds.ls(type=inverse_type_filters, recursive=True) if inverse_type_filters else list()
         type_set = set(type_filtered).difference(inverse_type_filtered)
 
         if (name_filters + inverse_name_filters) and (type_filters + inverse_type_filters):
@@ -171,7 +171,7 @@ class IconButton(QWidget):
 
     images = dict()
 
-    def __init__(self, idleImageFile, checkedImageFile=None, checkable=False, parent=None):
+    def __init__(self, idleImageFile, checkedImageFile=None, checkable=False, parent=None, isChecked=False):
         super(IconButton, self).__init__(parent=parent)
         self.idleImageFile = idleImageFile
         self.checkedImageFile = checkedImageFile
@@ -182,7 +182,7 @@ class IconButton(QWidget):
 
         self.isHovered = False
         self.isClicked = False
-        self.isChecked = False
+        self.isChecked = isChecked
 
         self.hoveredColor = 50
         self.clickedColor = 100
@@ -267,6 +267,10 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         self.selectionEnabled = True
         self.namespace = True
 
+        #
+        self.selectionTree = SelectionTree()
+        self.selectionTree.itemSelectionChanged.connect(self.selectSelectionItem)
+
         # selection count
         self.selectionCount = QLabel()
         self.selectionCount.setToolTip('Number of Selected Objects')
@@ -300,15 +304,24 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         copySelectionTab.setMinimumSize(QSize(30, 30))
         copySelectionTab.clicked.append(self.tearOffSelectionCopy)
 
+        displayNamespaces = IconButton(':switchOff.png', ':switchOn.png', checkable=True, isChecked=True)
+        displayNamespaces.setToolTip('Show/Hide Namespaces')
+        displayNamespaces.setMinimumSize(QSize(30, 30))
+        displayNamespaces.checked.append(self.selectionTree.toggleNamespaces)
+
         selectionOptionsLayout = QHBoxLayout()
         selectionOptionsLayout.addWidget(lockSelection)
         selectionOptionsLayout.addWidget(saveSelection)
         selectionOptionsLayout.addWidget(copySelectionTab)
+        selectionOptionsLayout.addWidget(displayNamespaces)
+        # selectionOptionsLayout.addStretch()
+        # for _ in range(5):
+        #     icnBtn = IconButton(':Bookmark.png')
+        #     icnBtn.setMinimumSize(QSize(30, 30))
+        #     selectionOptionsLayout.addWidget(icnBtn)
         selectionOptionsLayout.addStretch()
         selectionOptionsLayout.addWidget(self.selectionCount)
 
-        self.selectionTree = SelectionTree()
-        self.selectionTree.itemSelectionChanged.connect(self.selectSelectionItem)
         # self.selectionList.setSelectionMode(QListWidget.ExtendedSelection)
 
         refreshAct = QAction('Auto-Refresh', self)
@@ -437,11 +450,70 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         ui.show()
 
 
+# class ObjectNameWidget(QWidget):
+#
+#     def __init__(self, longName, parent=None):
+#         super(ObjectNameWidget, self).__init__(parent)
+#
+#         name = longName.split('|')[-1]
+#         nameSplit = name.split(':')
+#         namespace = ':'.join(nameSplit[:-1])
+#         shortName = nameSplit[-1]
+#
+#         objType = cmds.objectType(longName)
+#
+#         item = QListWidgetItem()
+#         item.setData(Qt.UserRole, longName)
+#         item.setToolTip('{} ({})'.format(name, objType))
+#
+#         icon = IconWidget(longName, self)
+#         icon.setFixedSize(QSize(35, 35))
+#
+#         shortNameLabel = QLabel(shortName)
+#         # shortNameLabel.setFixedWidth(shortNameLabel.width())
+#
+#         nameLayout = QHBoxLayout()
+#         nameLayout.setAlignment(Qt.AlignLeft)
+#         nameLayout.setSpacing(0)
+#         if namespace:
+#             namespaceLabel = QLabel('{}:'.format(namespace))
+#             namespaceLabel.setStyleSheet("QLabel {color: rgb(150, 150, 150);}")
+#             nameLayout.addWidget(namespaceLabel)
+#         nameLayout.addWidget(shortNameLabel)
+#
+#         lay = QHBoxLayout(self)
+#         lay.setMargin(2)
+#         lay.setAlignment(Qt.AlignLeft)
+#         lay.addWidget(icon)
+#         lay.addLayout(nameLayout)
+
+
 class SelectionTree(QListWidget):
     def __init__(self, *args, **kwargs):
         super(SelectionTree, self).__init__(*args, **kwargs)
+        # self.setStyleSheet('QListWidget {background: rgb(50, 50, 50);} QListWidget::item:selected {background: rgb(100, 100, 100);}')
         self.setSelectionMode(QListWidget.ExtendedSelection)
         self.nodes = list()
+        self.itemSelectionChanged.connect(self.selectItems)
+
+        self.displayNamespaces = True
+
+    def selectItems(self):
+        selectedItems = self.selectedItems()
+
+        items = [self.item(x) for x in range(self.count())]
+
+        for item in items:
+            wid = self.itemWidget(item)
+            wid.isSelected = item in selectedItems
+
+    def toggleNamespaces(self, state):
+        self.displayNamespaces = state
+        items = [self.item(x) for x in range(self.count())]
+
+        for item in items:
+            wid = self.itemWidget(item)
+            wid.displayNamespace = state
 
     def selectedNodes(self):
         return [i.data(Qt.UserRole) for i in self.selectedItems()]
@@ -470,36 +542,102 @@ class SelectionTree(QListWidget):
 
         for index, (longName, name, shortName, namespace) in enumerate(zip(nodes, names, shortNames, namespaces)):
             objType = cmds.objectType(longName)
-
             item = QListWidgetItem()
             item.setData(Qt.UserRole, longName)
             item.setToolTip('{} ({})'.format(name, objType))
 
-            icon = IconWidget(longName, self)
-            icon.setFixedSize(QSize(35, 35))
+            nodeType = cmds.objectType(longName)
+            shapes = cmds.listRelatives(longName, shapes=True, fullPath=True) if nodeType != 'objectSet' else None
+            shapType = cmds.objectType(shapes[0]) if shapes else None
 
-            shortNameLabel = QLabel(shortName)
+            finalType = nodeType if not shapType else shapType
+            isReferenced = cmds.referenceQuery(longName, isNodeReferenced=True)
 
-            lay = QHBoxLayout()
-            lay.setMargin(2)
-            lay.addWidget(icon)
-            if namespace:
-                namespaceLabel = QLabel('{}:'.format(namespace))
-                namespaceLabel.setStyleSheet("QLabel {color: gray;}")
-                lay.addWidget(namespaceLabel)
-            lay.addWidget(shortNameLabel)
-            lay.addStretch()
-
-            wid = QWidget()
-            wid.setLayout(lay)
+            name = longName.split('|')[-1]
+            wid = NodeWidget(name, objectType=finalType, isReferenced=isReferenced, parent=self)
+            wid.displayNamespace = self.displayNamespaces
+            wid.setFixedHeight(35)
+            # wid.setLayout(lay)
 
             self.addItem(item)
             self.setItemWidget(item, wid)
-            item.setSizeHint(QSize(0, 35))
+            item.setSizeHint(QSize(0, 40))
 
     # def select(self):
     #     nodes = [i.data(0, Qt.UserRole) for i in self.selectedItems()]
     #     cmds.select(nodes, noExpand=True)
+
+
+class NodeWidget(QWidget):
+
+    def __init__(self, longName, objectType=None, isReferenced=False, parent=None):
+        super(NodeWidget, self).__init__(parent)
+
+        longNameSplit = longName.split(':')
+        namespace = ':'.join(longNameSplit[:-1])
+        self.namespace = '{}:'.format(namespace) if namespace else namespace
+        self.name = longNameSplit[-1]
+        self.objectType = objectType
+        self.isReferenced = isReferenced
+
+        self.mainColor = QColor(200, 200, 200)
+        self.secondaryColor = QColor(125, 125, 125)
+        self.selectedColor = QColor(255, 255, 255)
+
+        self.setMinimumHeight(35)
+
+        self._displayNamespace = True
+        self.isSelected = False
+
+    @property
+    def displayNamespace(self):
+        return self._displayNamespace
+
+    @displayNamespace.setter
+    def displayNamespace(self, value):
+        self._displayNamespace = value
+        self.update()
+
+    def paintEvent(self, *args, **kwargs):
+        painter = QPainter(self)
+        font = QFont()
+        font.setPixelSize(self.height() * .66)
+        fontMetrics = QFontMetrics(font)
+        fontHeight = fontMetrics.height()
+
+        typeImage = QImage(':{}.svg'.format(self.objectType))
+        if typeImage.isNull():
+            typeImage = QImage(':default.svg')
+        typeImage = typeImage.smoothScaled(self.height(), self.height())
+
+        namespacePen = QPen()
+        namespacePen.setColor(self.secondaryColor if not self.isSelected else self.selectedColor)
+
+        namePen = QPen()
+        namePen.setColor(self.mainColor if not self.isSelected else self.selectedColor)
+
+        namespaceWidth = fontMetrics.horizontalAdvance(self.namespace) if self.displayNamespace else 0
+        nameWidth = fontMetrics.horizontalAdvance(self.name)
+
+        typeRect = QRect(0, 0, self.height(), self.height())
+
+        namespaceRect = QRect(typeRect.x() + typeRect.width(), 0, namespaceWidth, fontHeight)
+        nameRect = QRect(namespaceRect.x() + namespaceRect.width(), 0, nameWidth, fontHeight)
+
+        # draw
+        painter.drawImage(typeRect, typeImage)
+        if self.isReferenced:
+            refRect = QRect(0, 0, self.height() * .5, self.height() * .5)
+            refImage = QImage(':reference.svg').smoothScaled(self.height() * .5, self.height() * .5)
+            painter.drawImage(refRect, refImage)
+
+        painter.setFont(font)
+        painter.setPen(namespacePen)
+        if self.displayNamespace:
+            painter.drawText(namespaceRect, self.namespace)
+
+        painter.setPen(namePen)
+        painter.drawText(nameRect, self.name)
 
 
 class TearOffSelectionWindow(QDialog):
@@ -510,6 +648,10 @@ class TearOffSelectionWindow(QDialog):
 
         self.selectionTree = SelectionTree()
         self.selectionTree.load(nodes)
+        self.selectionTree.itemSelectionChanged.connect(self.selectSelectionItem)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.selectionTree)
+
+    def selectSelectionItem(self, *args, **kwargs):
+        cmds.select(self.selectionTree.selectedNodes(), noExpand=True)
