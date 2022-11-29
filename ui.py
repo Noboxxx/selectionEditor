@@ -333,14 +333,10 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         menuBar = QMenuBar()
         menuBar.addMenu(displayMenu)
 
-        selectionLayout = QVBoxLayout()
-        selectionLayout.setMenuBar(menuBar)
-        # selectionLayout.setMargin(0)
-        selectionLayout.addLayout(selectionOptionsLayout)
-        selectionLayout.addWidget(self.selectionTree)
-
-        selectionTab = QWidget()
-        selectionTab.setLayout(selectionLayout)
+        # selectionLayout = QVBoxLayout()
+        # selectionLayout.setSpacing(0)
+        # selectionLayout.addLayout(selectionOptionsLayout)
+        # selectionLayout.addWidget(self.selectionTree)
 
         #
 
@@ -350,16 +346,13 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
 
         self.savedTree = QTreeWidget()
 
-        #
-        tabWid = QTabWidget()
-        tabWid.addTab(selectionTab, 'Selection')
-        tabWid.addTab(self.historyTree, 'History')
-        tabWid.addTab(self.savedTree, 'Saved')
-
         # main layout
         mainLayout = QVBoxLayout(self)
+        # mainLayout.setMargin(0)
         mainLayout.addLayout(selectByNameTypeLayout)
-        mainLayout.addWidget(tabWid)
+        mainLayout.addLayout(selectionOptionsLayout)
+        mainLayout.addWidget(self.selectionTree)
+        # mainLayout.addLayout(selectionLayout)
 
         #
         self.eventCallback = None
@@ -432,18 +425,19 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
             self.historySelection = selection
 
     def addEntryToHistory(self, selection):
-        self.historyTree.clearSelection()
-
-        currentDateAndTime = datetime.now()
-        selectionLabel = ', '.join([i.split('|')[-1] for i in selection])
-        item = QTreeWidgetItem((currentDateAndTime.strftime("%H:%M:%S"), str(len(selection)), selectionLabel,))
-
-        item.setData(0, Qt.UserRole, selection)
-        self.historyTree.insertTopLevelItem(0, item)
-
-        self.historyEnabled = False
-        item.setSelected(True)
-        self.historyEnabled = True
+        pass
+        # self.historyTree.clearSelection()
+        #
+        # currentDateAndTime = datetime.now()
+        # selectionLabel = ', '.join([i.split('|')[-1] for i in selection])
+        # item = QTreeWidgetItem((currentDateAndTime.strftime("%H:%M:%S"), str(len(selection)), selectionLabel,))
+        #
+        # item.setData(0, Qt.UserRole, selection)
+        # self.historyTree.insertTopLevelItem(0, item)
+        #
+        # self.historyEnabled = False
+        # item.setSelected(True)
+        # self.historyEnabled = True
 
     def tearOffSelectionCopy(self):
         ui = TearOffSelectionWindow(self.selectionTree.nodes, parent=self)
@@ -522,29 +516,10 @@ class SelectionTree(QListWidget):
         self.clear()
         self.nodes = nodes
 
-        shortNames = list()
-        names = list()
-        nonUniqueNames = list()
-        namespaces = list()
-        for longName in nodes:
-            name = longName.split('|')[-1]
-            nameSplit = name.split(':')
-            shortName = nameSplit[-1]
-            namespace = ':'.join(nameSplit[:-1])
-
-            if shortName in shortNames:
-                if shortName not in nonUniqueNames:
-                    nonUniqueNames.append(shortName)
-
-            names.append(name)
-            namespaces.append(namespace)
-            shortNames.append(shortName)
-
-        for index, (longName, name, shortName, namespace) in enumerate(zip(nodes, names, shortNames, namespaces)):
+        for index, longName in enumerate(nodes):
             objType = cmds.objectType(longName)
             item = QListWidgetItem()
             item.setData(Qt.UserRole, longName)
-            item.setToolTip('{} ({})'.format(name, objType))
 
             nodeType = cmds.objectType(longName)
             shapes = cmds.listRelatives(longName, shapes=True, fullPath=True) if nodeType != 'objectSet' else None
@@ -554,18 +529,15 @@ class SelectionTree(QListWidget):
             isReferenced = cmds.referenceQuery(longName, isNodeReferenced=True)
 
             name = longName.split('|')[-1]
+            item.setToolTip('{} ({})'.format(name, objType))
             wid = NodeWidget(name, objectType=finalType, isReferenced=isReferenced, parent=self)
             wid.displayNamespace = self.displayNamespaces
+            # wid.secondaryColor = QColor(175, 125, 125)
             wid.setFixedHeight(35)
-            # wid.setLayout(lay)
 
             self.addItem(item)
             self.setItemWidget(item, wid)
             item.setSizeHint(QSize(0, 40))
-
-    # def select(self):
-    #     nodes = [i.data(0, Qt.UserRole) for i in self.selectedItems()]
-    #     cmds.select(nodes, noExpand=True)
 
 
 class NodeWidget(QWidget):
