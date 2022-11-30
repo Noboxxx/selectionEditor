@@ -4,8 +4,8 @@ import webbrowser
 
 from PySide2.QtSvg import QSvgRenderer
 
-from PySide2.QtCore import Qt, QSize, QRect
-from PySide2.QtGui import QIcon, QPixmap, QColor, QPainter, QImage, QMouseEvent, QFont, QFontMetrics, QPen
+from PySide2.QtCore import Qt, QSize, QRect, QPoint
+from PySide2.QtGui import QIcon, QPixmap, QColor, QPainter, QImage, QMouseEvent, QFont, QFontMetrics, QPen, QBrush
 from PySide2.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QPushButton, QGridLayout, QColorDialog, \
     QComboBox, QLabel, QDoubleSpinBox, QDialog, QCheckBox, QFrame, QApplication, QLineEdit, QFileDialog, QMenuBar, \
     QMenu, QAction, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QTabWidget, QWidget, QListWidget, \
@@ -254,7 +254,7 @@ class IconButton(QWidget):
         painter.drawImage(0, 0, img)
 
 
-class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
+class SelectionEditor(QDialog):   #  MayaQWidgetDockableMixin,
 
     def __init__(self, parent=getMayaMainWindow()):
         super(SelectionEditor, self).__init__(parent=parent)
@@ -295,9 +295,13 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
         lockSelection.setMinimumSize(QSize(30, 30))
         lockSelection.checked.append(self.lockToggled)
 
-        saveSelection = IconButton(':addBookmark.png')
-        saveSelection.setToolTip('Save Current Selection')
-        saveSelection.setMinimumSize(QSize(30, 30))
+        self.saveSelection = IconButton(':Bookmark.png')
+        self.saveSelection.setToolTip('Save Current Selection')
+        self.saveSelection.setMinimumSize(QSize(30, 30))
+        self.saveSelection.clicked.append(self.test)
+
+        self.saveWindow = QWidget(self.saveSelection)
+        self.saveWindow.setFixedSize(QSize(100, 100))
 
         copySelectionTab = IconButton(':UVTkCopySet.png')
         copySelectionTab.setToolTip('Tear Off Selection in another Window')
@@ -311,7 +315,7 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
 
         selectionOptionsLayout = QHBoxLayout()
         selectionOptionsLayout.addWidget(lockSelection)
-        selectionOptionsLayout.addWidget(saveSelection)
+        selectionOptionsLayout.addWidget(self.saveSelection)
         selectionOptionsLayout.addWidget(copySelectionTab)
         selectionOptionsLayout.addWidget(displayNamespaces)
         # selectionOptionsLayout.addStretch()
@@ -359,6 +363,19 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
 
         self.resize(QSize(130 * dpiF, 260 * dpiF))
 
+    def test(self):
+        if self.saveWindow.isVisible():
+            self.saveWindow.hide()
+            return
+
+        self.saveWindow.show()
+
+        # x = self.saveSelection.x()
+        # y = self.saveSelection.y() + self.saveSelection.height()
+        #
+        # self.saveWindow.move(self.mapToGlobal(QPoint(x, y)))
+        # self.saveWindow.resize(QSize(500, 500))
+
     def lockToggled(self, state):
         self.selectionEnabled = not state
         if not state:
@@ -393,14 +410,18 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
 
     def deleteLater(self, *args, **kwargs):
         self.removeCallBack()
+        self.saveWindow.deleteLater()
         super(SelectionEditor, self).deleteLater(*args, **kwargs)
 
     def closeEvent(self, *args, **kwargs):
         self.removeCallBack()
+        self.saveWindow.close()
         super(SelectionEditor, self).closeEvent(*args, **kwargs)
 
     def hideEvent(self, *args, **kwargs):
+        print('hide')
         self.removeCallBack()
+        self.saveWindow.hide()
         super(SelectionEditor, self).hideEvent(*args, **kwargs)
 
     def showEvent(self, *args, **kwargs):
@@ -419,7 +440,7 @@ class SelectionEditor(MayaQWidgetDockableMixin, QDialog):
             self.selectionTree.load(selection)
             self.selection = selection
 
-        print('SELECTION CHANGED', time.time() - start)
+        # print('SELECTION CHANGED', time.time() - start)
         if selection and self.historyEnabled and selection != self.historySelection:
             self.addEntryToHistory(selection)
             self.historySelection = selection
@@ -499,6 +520,8 @@ class SelectionTree(QListWidget):
 
         for item in items:
             wid = self.itemWidget(item)
+            if not wid:
+                continue
             wid.isSelected = item in selectedItems
 
     def toggleNamespaces(self, state):
